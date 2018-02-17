@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "preserveConstEnums": true,
+    "sourceMap": true,
+    "target": "es6",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "importHelpers": true,
+    "removeComments": true,
+    "outDir": "lib",
+    "lib": [
+      "es6",
+      "es2017",
+      "esnext.asynciterable"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "*": [
+        "node_modules/*",
+        "src/types/*"
+      ]
+    },
+    "types": [
+      "node",
+      "lodash"
+    ]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "**/*.js", "src/test/mock/"],
+  "compileOnSave": false
+}
