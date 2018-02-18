@@ -1,7 +1,15 @@
 import _ = require('lodash')
 import YAML = require('js-yaml')
 import { genOptionsBlock } from './gen-options-block'
-import { IEventConf, IHttpEventConf, IServerlessYml, Functions, IBuildOpts } from './types'
+import { IEventConf, IHttpEventConf, IServerlessYml, Functions, IBuildOpts, ICors } from './types'
+import { naming } from './serverless-utils'
+
+interface IPathsCors {
+  [path: string]: ICors
+  // [path: string]: {
+  //   [method: string]: ICors
+  // }
+}
 
 export class Builder {
   private functions: Functions
@@ -16,12 +24,10 @@ export class Builder {
       functions[name] = {
         ...conf,
         events: conf.events
-          .filter(event => 'http' in event)
+          .filter(isHttpEvent)
           .map(normalizeHttpEvent)
       }
     }, {})
-
-    this.prefix = `${service}-${stage}`
   }
 
   public build = ({ binaryMimeTypes }: IBuildOpts) => {
@@ -38,7 +44,7 @@ export class Builder {
       httpEvents.forEach(event => this.addEvent(name, paths, event))
     })
 
-    const cors = {}
+    const cors:any = {}
     _.forEach(functions, (conf, name) => {
       const httpEvents = conf.events
         .filter(event => 'http' in event)
@@ -46,19 +52,26 @@ export class Builder {
 
       httpEvents.forEach(event => {
         const { path, method } = event
-        if (!cors[path]) cors[path] = {}
-        if (hasCors(event)) {
-          // TODO: load actual cors config
-          cors[path][event.method] = true
+        if (!event.cors) return
+
+        // overwrite
+        if (cors[path]) {
+          console.warn(`overwriting cors for path: ${path}`)
         }
-      }, {})
+
+        const current = cors[path] || {}
+        cors[path] = {
+          ...event.cors,
+          ...current,
+          methods: _.uniq(event.cors.methods.concat(current.methods || []))
+        }
+      })
     })
 
-    for (let path in cors) {
-      paths[path].options = genOptionsBlock({
-        methods: _.keys(cors[path])
-      })
-    }
+      // TODO: cors per method
+    _.forEach(cors, (conf, path) => {
+      paths[path].options = genOptionsBlock(conf)
+    })
 
     if (binaryMimeTypes) {
       swagger['x-amazon-apigateway-binary-media-types'] = [].concat(binaryMimeTypes)
@@ -81,24 +94,21 @@ export class Builder {
     return {
       responses: {},
       'x-amazon-apigateway-integration': {
-        uri: {
-          'Fn::Sub': 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${' + this.prefixId(lambdaName) + '.Arn}/invocations'
-        },
-        // uri : 'arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:210041114155:function:safe-dev-auth/invocations',
+        uri: {"Fn::Join": ["",
+          ['arn:aws:apigateway:', {"Ref": "AWS::Region"}, ":lambda:path/2015-03-31/functions/", {"Fn::GetAtt": [naming.getLambdaLogicalId(lambdaName), "Arn"]}, "/invocations"]
+        ]},
         passthroughBehavior : 'when_no_match',
+        // httpMethod : method.toUpperCase(),
         httpMethod : 'POST',
         type : 'aws_proxy'
       }
     }
   }
-
-  private prefixId = (id:string):string => {
-    return this.prefix + id
-  }
 }
 
 export const build = (yml: IServerlessYml|string|Buffer, opts: IBuildOpts={}) => new Builder(loadYml(yml)).build(opts)
 
+const isHttpEvent = (event: IEventConf) => 'http' in event
 const hasCors = (event: IHttpEventConf) => event.cors
 
 const genBaseSwagger = ({ service, stage }: {
